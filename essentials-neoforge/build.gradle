@@ -1,0 +1,36 @@
+// Build script of every ":essentials-neoforge:<mc>" subproject.
+plugins {
+    id "essentials.loader"
+}
+
+dependencies {
+    neoForge "net.neoforged:neoforge:${neoforge_version}"
+
+    // @Environment annotation of the shared sources, NeoForge ignores it
+    compileOnly("net.fabricmc:fabric-loader:${fabric_loader_version}") { transitive = false }
+
+    // MixinExtras annotations of the shared sources; Visor ships the runtime
+    compileOnly(annotationProcessor("io.github.llamalad7:mixinextras-common:${mixin_extras_version}"))
+}
+
+loom {
+    neoForge {
+        convertAccessWideners(modJar, loom.accessWidenerPath.get().asFile.name)
+    }
+}
+
+// NeoForge 1.20.5+ reads META-INF/neoforge.mods.toml -> 1.20.4 and older read META-INF/mods.toml
+if (stonecutter.eval(minecraft_version, "<1.20.5")) {
+    processResources {
+        filesMatching("META-INF/neoforge.mods.toml") { name = "mods.toml" }
+    }
+}
+
+// NeoForge 20.4 made the deprecated "mandatory" dependency field a hard error
+if (stonecutter.eval(minecraft_version, ">=1.20.4")) {
+    processResources {
+        filesMatching("META-INF/neoforge.mods.toml") {
+            filter { String line -> line.replace("mandatory = true", "type = \"required\"") }
+        }
+    }
+}

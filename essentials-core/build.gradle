@@ -1,0 +1,27 @@
+// Build script of every ":essentials-core:<mc>" subproject.
+plugins {
+    id "essentials.minecraft"
+}
+
+dependencies {
+    // @Environment annotation
+    modImplementation "net.fabricmc:fabric-loader:${fabric_loader_version}"
+
+    modCompileOnly visorApi("fabric")
+}
+
+// The core sources are compiled into each loader jar, this node only type-checks them.
+if (!unobfuscated) {
+    tasks.named("remapJar") { enabled = false }
+    tasks.named("remapSourcesJar") { enabled = false }
+}
+
+configurations {
+    coreJava      { canBeConsumed = true; canBeResolved = false }
+    coreResources { canBeConsumed = true; canBeResolved = false }
+}
+afterEvaluate {
+    def generate = tasks.named("stonecutterGenerate")
+    sourceSets.main.java.srcDirs.each { dir -> artifacts.add("coreJava", dir) { builtBy generate } }
+    sourceSets.main.resources.srcDirs.each { dir -> artifacts.add("coreResources", dir) { builtBy generate } }
+}

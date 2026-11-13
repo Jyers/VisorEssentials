@@ -1,0 +1,105 @@
+/* Plugin applied to the MOD LOADER subprojects */
+plugins {
+    id "essentials.minecraft"
+}
+
+def loader = branch
+def corePath = ":essentials-core:${minecraft_version}"
+
+// ---- Shared sources ------------------------------------------------------------------------
+configurations {
+    coreJava      { canBeConsumed = false; canBeResolved = true }
+    coreResources { canBeConsumed = false; canBeResolved = true }
+}
+
+dependencies {
+    compileOnly project(path: corePath, configuration: "namedElements")
+    coreJava      project(path: corePath, configuration: "coreJava")
+    coreResources project(path: corePath, configuration: "coreResources")
+
+    modCompileOnly visorApi(loader)
+}
+
+def mcversion = mcversionCoreLayout()
+def mcversionSpec = mcversion.excludeSpec(minecraft_version)
+def mcversionParked = mcversion.parkedSources(project, minecraft_version)
+compileJava {
+    dependsOn configurations.coreJava
+    source configurations.coreJava, mcversionParked
+    exclude { element -> mcversionSpec.isSatisfiedBy(element) }
+}
+processResources {
+    dependsOn configurations.coreResources
+    from configurations.coreResources
+}
+sourcesJar {
+    from configurations.coreJava, mcversionParked
+    exclude { element -> mcversionSpec.isSatisfiedBy(element) }
+}
+
+// ---- Mod jar --------------------------------------------------------------------------------
+project.ext.modJar = tasks.named(unobfuscated ? "jar" : "remapJar")
+
+// ---- Running --------------------------------------------------------------------------------
+loom {
+    mods {
+        create(mod_id) { sourceSet sourceSets.main }
+    }
+    runs {
+        configureEach {
+            preferGradleTask = true
+            ideConfigGenerated stonecutter.current.active
+            configName = "${loader.capitalize()} ${minecraft_version} ${name}"
+            runDir "../../../run/${loader}/${minecraft_version}/${name}"
+        }
+    }
+}
+
+// ---- Mixin config check ---------------------------------------------------------------------
+tasks.register("checkMixinConfigs") {
+    description = "Verifies that every mixin listed in the mixin configs was compiled for this node"
+    dependsOn "classes"
+    def classesDirs = sourceSets.main.output.classesDirs
+    def resourcesDir = sourceSets.main.output.resourcesDir
+    doLast {
+        def missing = []
+        fileTree(resourcesDir) { include "*.mixins.json", "*.mixins.*.json" }.each { json ->
+            def config = new groovy.json.JsonSlurper().parse(json)
+            def pkg = config.package.replace('.', '/')
+            ["mixins", "client", "server"].each { key ->
+                (config[key] ?: []).each { name ->
+                    if (!classesDirs.any { new File(it, "${pkg}/${name.replace('.', '/')}.class").file }) {
+                        missing << "${json.name}: ${name}"
+                    }
+                }
+            }
+        }
+        if (missing) {
+            throw new GradleException("Mixin classes missing for ${project.path}:\n  " + missing.join("\n  "))
+        }
+    }
+}
+tasks.named("check") { dependsOn "checkMixinConfigs" }
+
+// ---- Build ----------------------------------------------------------------------------------
+tasks.register("buildAndCollect", Copy) {
+    group = "build"
+    description = "Builds the ${loader} ${minecraft_version} mod jar and copies it to <root>/build/libs"
+    dependsOn "build"
+    // fabric for some reason has incorrect timestamp without this
+    // (when u built and see lastChange to fabric jar was a while ago is annoying)
+    outputs.upToDateWhen { false }
+    def marker = "+mc${minecraft_version}-${loader}"
+    def current = "${base.archivesName.get()}-${mod_version}+"
+    doFirst {
+        // previous builds of this target and every jar of another mod version
+        def dir = rootProject.layout.buildDirectory.dir("libs").get().asFile
+        dir.listFiles()?.each { f ->
+            if (f.name.endsWith(".jar") && (f.name.contains(marker) || !f.name.startsWith(current))) {
+                f.delete()
+            }
+        }
+    }
+    from(modJar.flatMap { it.archiveFile })
+    into(rootProject.layout.buildDirectory.dir("libs"))
+}
